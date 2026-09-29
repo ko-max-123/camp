@@ -1,0 +1,26 @@
+{
+  "note": "画面のJSON保存形式イメージ。数値はサンプルです。",
+  "place": {
+    "name": "メープル那須高原キャンプグランド",
+    "lat": 36.96,
+    "lon": 140.0
+  },
+  "candidates": [
+    {
+      "start": "2026-10-16",
+      "end": "2026-10-18",
+      "mode": "forecast",
+      "overall": 86,
+      "scores": {
+        "setup": 91,
+        "fire": 82,
+        "night": 73,
+        "pack": 96
+      },
+      "condensation": {
+        "level": "高"
+      },
+      "drying": "09:00ごろ"
+    }
+  ]
+}

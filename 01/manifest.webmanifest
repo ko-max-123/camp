@@ -1,0 +1,10 @@
+{
+  "name":"Camp Window Finder",
+  "short_name":"Camp Window",
+  "description":"キャンプ候補日を設営・焚き火・夜・撤収の快適度で比較",
+  "start_url":"./",
+  "display":"standalone",
+  "background_color":"#0e1713",
+  "theme_color":"#14231d",
+  "icons":[{"src":"./assets/icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any"}]
+}
