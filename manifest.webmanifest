@@ -1,0 +1,10 @@
+{
+  "name":"Camp Dashboard",
+  "short_name":"CampDash",
+  "description":"キャンプ中に必要な気象・星空・結露・電源・周辺施設をまとめるダッシュボード",
+  "start_url":"./",
+  "display":"standalone",
+  "background_color":"#09110d",
+  "theme_color":"#0b1510",
+  "lang":"ja"
+}

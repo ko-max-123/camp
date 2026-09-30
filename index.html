@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#0b1510" />
+  <meta name="description" content="無料APIで動くキャンプ向け統合ダッシュボード" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="stylesheet" href="styles.css" />
+  <title>Camp Dashboard</title>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand-wrap">
+        <div class="brand-mark">C</div>
+        <div>
+          <p class="eyebrow">FIELD STATUS</p>
+          <h1>Camp Dashboard</h1>
+        </div>
+      </div>
+      <button id="settingsBtn" class="icon-btn" type="button" aria-label="電源設定">⚙</button>
+    </header>
+
+    <section class="search-panel panel">
+      <div class="search-row">
+        <div class="search-input-wrap">
+          <span>⌕</span>
+          <input id="placeInput" autocomplete="off" placeholder="キャンプ場・市町村・地名を検索" value="那須塩原" />
+        </div>
+        <button id="searchBtn" class="primary-btn" type="button">検索</button>
+        <button id="geoBtn" class="secondary-btn" type="button">現在地</button>
+      </div>
+      <div id="searchResults" class="search-results" hidden></div>
+      <div class="search-hint">都市検索は Open-Meteo、見つからない地名・施設名は OpenStreetMap で補完します。</div>
+    </section>
+
+    <div id="notice" class="notice" hidden></div>
+
+    <main id="dashboard" hidden>
+      <section class="location-strip">
+        <div>
+          <div class="eyebrow">CAMPSITE / LOCATION</div>
+          <h2 id="locationName">—</h2>
+          <p id="locationMeta">—</p>
+        </div>
+        <div class="day-picker-wrap">
+          <label for="dayPicker">表示日</label>
+          <select id="dayPicker"></select>
+        </div>
+      </section>
+
+      <section class="hero-grid">
+        <article class="panel hero-weather">
+          <div class="hero-weather-top">
+            <div>
+              <div class="eyebrow">NOW / BASE WEATHER</div>
+              <div class="temp-line"><strong id="currentTemp">—</strong><span>°C</span></div>
+              <div id="currentCondition" class="condition">—</div>
+            </div>
+            <div id="weatherGlyph" class="weather-glyph">☀</div>
+          </div>
+          <div class="metric-grid four">
+            <div class="metric"><span>体感</span><b id="feelsLike">—</b></div>
+            <div class="metric"><span>湿度</span><b id="humidity">—</b></div>
+            <div class="metric"><span>風</span><b id="wind">—</b></div>
+            <div class="metric"><span>突風</span><b id="gust">—</b></div>
+          </div>
+        </article>
+
+        <article class="panel quick-status">
+          <div class="eyebrow">CAMP STATUS</div>
+          <div id="overallScore" class="score-ring" style="--score:70"><span>—</span></div>
+          <div>
+            <h3 id="overallLabel">解析待ち</h3>
+            <p id="overallCopy">地点を読み込むと、設営・夜・撤収に関係する要素をまとめます。</p>
+          </div>
+        </article>
+      </section>
+
+      <section class="status-cards">
+        <article class="status-card panel" id="rainCard">
+          <div class="card-icon">☔</div>
+          <div class="status-card-body">
+            <span>雨</span><b id="rainHeadline">—</b><small id="rainDetail">—</small>
+          </div>
+        </article>
+        <article class="status-card panel" id="fireCard">
+          <div class="card-icon">🔥</div>
+          <div class="status-card-body">
+            <span>焚き火気象</span><b id="fireHeadline">—</b><small id="fireDetail">気象条件のみの目安</small>
+          </div>
+        </article>
+        <article class="status-card panel" id="sunsetCard">
+          <div class="card-icon">◒</div>
+          <div class="status-card-body">
+            <span>日没</span><b id="sunsetHeadline">—</b><small id="sunsetDetail">—</small>
+          </div>
+        </article>
+        <article class="status-card panel" id="starCard">
+          <div class="card-icon">✦</div>
+          <div class="status-card-body">
+            <span>星空</span><b id="starHeadline">—</b><small id="starDetail">—</small>
+          </div>
+        </article>
+        <article class="status-card panel" id="dewCard">
+          <div class="card-icon">◌</div>
+          <div class="status-card-body">
+            <span>結露</span><b id="dewHeadline">—</b><small id="dewDetail">—</small>
+          </div>
+        </article>
+        <article class="status-card panel" id="powerCard">
+          <div class="card-icon">ϟ</div>
+          <div class="status-card-body">
+            <span>電源</span><b id="powerHeadline">—</b><small id="powerDetail">—</small>
+          </div>
+        </article>
+      </section>
+
+      <section class="two-col">
+        <article class="panel">
+          <div class="section-head">
+            <div><span class="eyebrow">NEXT 12 HOURS</span><h3>雨・風タイムライン</h3></div>
+            <span class="legend"><i class="rain-dot"></i>降水確率</span>
+          </div>
+          <div id="timeline" class="timeline"></div>
+        </article>
+
+        <article class="panel">
+          <div class="section-head">
+            <div><span class="eyebrow">FIRE WEATHER</span><h3>夕方〜夜の焚き火条件</h3></div>
+          </div>
+          <div id="fireTimeline" class="fire-timeline"></div>
+          <div class="safety-note">キャンプ場の火気ルール・自治体の規制・現地管理者の指示を必ず優先してください。ここでは気象値のみを評価します。</div>
+        </article>
+      </section>
+
+      <section class="two-col">
+        <article class="panel">
+          <div class="section-head">
+            <div><span class="eyebrow">NIGHT</span><h3>夜のコンディション</h3></div>
+          </div>
+          <div class="night-grid">
+            <div class="night-stat"><span>星空ベスト</span><b id="bestStarTime">—</b><small id="bestStarReason">—</small></div>
+            <div class="night-stat"><span>最低気温</span><b id="nightMinTemp">—</b><small>18:00〜翌07:00</small></div>
+            <div class="night-stat"><span>最大湿度</span><b id="nightMaxHumidity">—</b><small>結露の参考</small></div>
+            <div class="night-stat"><span>月明かり</span><b id="moonLight">—</b><small id="moonPhase">—</small></div>
+          </div>
+        </article>
+
+        <article class="panel">
+          <div class="section-head">
+            <div><span class="eyebrow">PORTABLE POWER</span><h3>電源・ソーラー概算</h3></div>
+            <button id="recalcPower" class="mini-btn" type="button">再計算</button>
+          </div>
+          <div class="battery-wrap">
+            <div class="battery"><div id="batteryFill" class="battery-fill"></div></div>
+            <div><div id="batteryPercent" class="battery-percent">—</div><div id="batteryEndLabel" class="battery-sub">—</div></div>
+          </div>
+          <div class="metric-grid three compact">
+            <div class="metric"><span>容量</span><b id="capacityDisplay">—</b></div>
+            <div class="metric"><span>平均負荷</span><b id="loadDisplay">—</b></div>
+            <div class="metric"><span>パネル</span><b id="solarDisplay">—</b></div>
+          </div>
+        </article>
+      </section>
+
+      <section class="panel nearby-panel">
+        <div class="section-head nearby-head">
+          <div><span class="eyebrow">NEARBY</span><h3>困った時の周辺施設</h3></div>
+          <button id="nearbyBtn" class="secondary-btn" type="button">8km以内を取得</button>
+        </div>
+        <div id="nearbyState" class="nearby-state">必要な時だけ取得します。スーパー、コンビニ、ガソリン、病院、温泉、ホームセンターを検索します。</div>
+        <div id="nearbyGrid" class="nearby-grid"></div>
+      </section>
+
+      <section class="panel week-panel">
+        <div class="section-head">
+          <div><span class="eyebrow">7 DAYS</span><h3>キャンプ目線の週間一覧</h3></div>
+        </div>
+        <div id="weekForecast" class="week-forecast"></div>
+      </section>
+    </main>
+
+    <section id="emptyState" class="empty-state panel">
+      <div class="empty-icon">⌂</div>
+      <h2>キャンプ地を検索してください</h2>
+      <p>天気だけでなく、雨・風・星空・結露・日没・電源・周辺施設まで1つにまとめます。</p>
+    </section>
+
+    <footer>
+      Weather: Open-Meteo / Place fallback & nearby POI: OpenStreetMap contributors, Overpass API.<br>
+      各指数は本プロトタイプ独自の目安です。防災情報・火気規制・キャンプ場ルールの代替ではありません。
+    </footer>
+  </div>
+
+  <dialog id="settingsDialog">
+    <form method="dialog" class="settings-form">
+      <div class="dialog-head"><div><div class="eyebrow">POWER SETTINGS</div><h3>ポータブル電源</h3></div><button value="cancel" class="icon-btn" aria-label="閉じる">×</button></div>
+      <label>バッテリー容量 (Wh)<input id="capacityInput" type="number" min="100" step="50" value="768"></label>
+      <label>現在残量 (%)<input id="batteryInput" type="number" min="0" max="100" step="1" value="80"></label>
+      <label>平均消費電力 (W)<input id="loadInput" type="number" min="0" step="5" value="45"></label>
+      <label>ソーラーパネル定格 (W)<input id="solarInput" type="number" min="0" step="10" value="160"></label>
+      <label>発電効率 (%)<input id="solarEffInput" type="number" min="20" max="95" step="5" value="70"></label>
+      <button id="saveSettingsBtn" class="primary-btn" value="default">保存して再計算</button>
+      <p class="dialog-note">発電量は短波放射量からの概算です。パネル角度・影・温度・MPPT・機種差は簡略化しています。</p>
+    </form>
+  </dialog>
+
+  <script src="app.js"></script>
+</body>
+</html>
