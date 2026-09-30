@@ -1,0 +1,619 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="OpenStreetMapデータから有人対応の可能性があるガソリンスタンドを抽出するプロトタイプ" />
+  <title>有人ガソリンスタンド Finder</title>
+  <link rel="preconnect" href="https://unpkg.com" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+  <style>
+    :root {
+      --bg: #f4f5f1;
+      --panel: #ffffff;
+      --ink: #172018;
+      --muted: #687168;
+      --line: #dce1da;
+      --accent: #1d5b3a;
+      --accent2: #e6efe9;
+      --staffed: #1f7a4d;
+      --mixed: #b36b00;
+      --self: #4c6fa6;
+      --unknown: #7a7f7a;
+      --danger: #a23b3b;
+      --shadow: 0 12px 30px rgba(20, 32, 23, .09);
+      --radius: 18px;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans JP", sans-serif;
+      color: var(--ink);
+      background: var(--bg);
+    }
+    button, input, select { font: inherit; }
+    button { cursor: pointer; }
+
+    .app { min-height: 100vh; display: grid; grid-template-rows: auto 1fr; }
+    header {
+      padding: 18px 22px 14px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(244,245,241,.96);
+      backdrop-filter: blur(14px);
+      position: relative;
+      z-index: 500;
+    }
+    .brand { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+    .brand h1 { margin: 0; font-size: clamp(22px, 3vw, 32px); letter-spacing: -.04em; }
+    .brand span { color: var(--muted); font-size: 13px; }
+
+    .workspace {
+      min-height: 0;
+      display: grid;
+      grid-template-columns: minmax(330px, 410px) 1fr;
+      gap: 0;
+    }
+    .sidebar {
+      min-height: 0;
+      overflow: auto;
+      padding: 18px;
+      border-right: 1px solid var(--line);
+      background: #fafbf8;
+    }
+    .map-wrap { position: relative; min-height: 520px; }
+    #map { width: 100%; height: 100%; min-height: 520px; background: #dde4dd; }
+
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 16px;
+      margin-bottom: 14px;
+    }
+    .card h2 { margin: 0 0 12px; font-size: 15px; }
+    .field { margin-bottom: 12px; }
+    .field label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; font-weight: 700; }
+    .row { display: flex; gap: 8px; }
+    input, select {
+      width: 100%;
+      min-height: 42px;
+      border: 1px solid #cfd6cf;
+      border-radius: 12px;
+      background: #fff;
+      color: var(--ink);
+      padding: 9px 11px;
+      outline: none;
+    }
+    input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(29,91,58,.12); }
+    button {
+      border: 0;
+      border-radius: 12px;
+      min-height: 42px;
+      padding: 9px 13px;
+      font-weight: 800;
+      background: #e8ebe6;
+      color: var(--ink);
+    }
+    button.primary { background: var(--accent); color: white; }
+    button.ghost { background: transparent; border: 1px solid var(--line); }
+    button:disabled { opacity: .55; cursor: not-allowed; }
+
+    .search-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .main-action { width: 100%; margin-top: 2px; }
+
+    .hint, .notice { font-size: 12px; line-height: 1.55; color: var(--muted); }
+    .notice { border-left: 3px solid #c9d2c9; padding-left: 10px; }
+    .status { min-height: 20px; font-size: 12px; margin-top: 9px; color: var(--muted); }
+    .status.error { color: var(--danger); }
+
+    .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+    .stat { border: 1px solid var(--line); border-radius: 12px; padding: 9px 6px; text-align: center; background: #fbfcfa; }
+    .stat b { display: block; font-size: 18px; }
+    .stat span { display: block; color: var(--muted); font-size: 10px; margin-top: 2px; }
+
+    .filters { display: flex; flex-wrap: wrap; gap: 7px; }
+    .chip { min-height: 34px; padding: 7px 10px; border: 1px solid var(--line); background: #fff; font-size: 12px; }
+    .chip.active { color: white; background: var(--ink); border-color: var(--ink); }
+
+    .list-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+    .list-head h2 { margin: 0; }
+    .list { display: grid; gap: 8px; }
+    .empty { padding: 18px 8px; text-align: center; color: var(--muted); font-size: 13px; }
+
+    .station {
+      width: 100%; text-align: left; min-height: auto; padding: 12px;
+      border: 1px solid var(--line); background: #fff; border-radius: 14px;
+    }
+    .station:hover { border-color: #aeb8ae; transform: translateY(-1px); }
+    .station-top { display: flex; gap: 8px; align-items: flex-start; justify-content: space-between; }
+    .station-name { font-weight: 850; line-height: 1.35; }
+    .badge { white-space: nowrap; border-radius: 999px; padding: 4px 8px; font-size: 10px; font-weight: 900; color: white; }
+    .badge.staffed { background: var(--staffed); }
+    .badge.mixed { background: var(--mixed); }
+    .badge.self { background: var(--self); }
+    .badge.unknown { background: var(--unknown); }
+    .station-meta { margin-top: 7px; font-size: 11px; color: var(--muted); line-height: 1.55; }
+    .reason { margin-top: 6px; font-size: 11px; line-height: 1.5; color: #3f493f; background: #f4f6f3; border-radius: 9px; padding: 6px 8px; }
+
+    .legend {
+      position: absolute; z-index: 450; right: 14px; top: 14px;
+      background: rgba(255,255,255,.94); border: 1px solid var(--line); border-radius: 12px;
+      box-shadow: var(--shadow); padding: 9px 10px; font-size: 11px; line-height: 1.8;
+    }
+    .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; }
+    .dot.staffed { background: var(--staffed); }
+    .dot.mixed { background: var(--mixed); }
+    .dot.self { background: var(--self); }
+    .dot.unknown { background: var(--unknown); }
+
+    .marker-pin {
+      width: 24px; height: 24px; border-radius: 50% 50% 50% 4px;
+      transform: rotate(-45deg); border: 2px solid #fff; box-shadow: 0 2px 7px rgba(0,0,0,.28);
+    }
+    .marker-pin.staffed { background: var(--staffed); }
+    .marker-pin.mixed { background: var(--mixed); }
+    .marker-pin.self { background: var(--self); }
+    .marker-pin.unknown { background: var(--unknown); }
+    .marker-pin.center { background: #172018; width: 18px; height: 18px; }
+
+    .popup-title { font-weight: 850; margin-bottom: 4px; }
+    .popup-small { font-size: 11px; color: #5f685f; line-height: 1.5; }
+
+    @media (max-width: 820px) {
+      .workspace { grid-template-columns: 1fr; grid-template-rows: auto minmax(56vh, 1fr); }
+      .sidebar { border-right: 0; border-bottom: 1px solid var(--line); max-height: none; overflow: visible; }
+      .map-wrap, #map { min-height: 58vh; }
+      .stats { grid-template-columns: repeat(2, 1fr); }
+    }
+  </style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="brand">
+      <h1>有人ガソリンスタンド Finder</h1>
+      <span>OSMタグを根拠に「有人対応」を抽出</span>
+    </div>
+  </header>
+
+  <main class="workspace">
+    <aside class="sidebar">
+      <section class="card">
+        <h2>1. 検索地点</h2>
+        <div class="field">
+          <label for="place">駅名・住所・施設名</label>
+          <div class="row">
+            <input id="place" type="text" placeholder="例：大宮駅 / 那須塩原駅" autocomplete="off" />
+            <button id="placeSearch" class="primary">検索</button>
+          </div>
+        </div>
+        <div class="search-actions">
+          <button id="locate">現在地</button>
+          <button id="useMapCenter">地図中心を使う</button>
+        </div>
+        <div id="placeStatus" class="status">地図をクリックして地点を指定することもできます。</div>
+      </section>
+
+      <section class="card">
+        <h2>2. ガソリンスタンド抽出</h2>
+        <div class="field">
+          <label for="radius">検索半径</label>
+          <select id="radius">
+            <option value="1000">1 km</option>
+            <option value="3000" selected>3 km</option>
+            <option value="5000">5 km</option>
+            <option value="10000">10 km</option>
+            <option value="20000">20 km</option>
+          </select>
+        </div>
+        <button id="findStations" class="primary main-action">この地点のGSを検索</button>
+        <div id="apiStatus" class="status"></div>
+        <p class="notice">「有人確定」は OSM の <code>full_service=yes</code> / <code>self_service=no</code> などを根拠にします。タグ未登録の店舗は「判定不明」に残します。</p>
+      </section>
+
+      <section class="card">
+        <div class="stats">
+          <div class="stat"><b id="nStaffed">0</b><span>有人確定</span></div>
+          <div class="stat"><b id="nMixed">0</b><span>併設/時間帯</span></div>
+          <div class="stat"><b id="nSelf">0</b><span>セルフ</span></div>
+          <div class="stat"><b id="nUnknown">0</b><span>不明</span></div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="list-head">
+          <h2>表示フィルター</h2>
+          <button id="exportCsv" class="ghost" disabled>CSV</button>
+        </div>
+        <div class="filters" id="filters">
+          <button class="chip active" data-filter="staffed">有人確定</button>
+          <button class="chip" data-filter="mixed">併設/時間帯</button>
+          <button class="chip" data-filter="self">セルフ</button>
+          <button class="chip" data-filter="unknown">判定不明</button>
+          <button class="chip" data-filter="all">すべて</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="list-head"><h2>検索結果 <span id="visibleCount"></span></h2></div>
+        <div id="stationList" class="list"><div class="empty">まだ検索していません。</div></div>
+      </section>
+
+      <section class="card hint">
+        <b>データについて</b><br>
+        地図・店舗情報：© OpenStreetMap contributors。場所検索は Nominatim、GS抽出は Overpass API を利用します。公開API向けのため、連打や大量検索は避けてください。
+      </section>
+    </aside>
+
+    <section class="map-wrap">
+      <div id="map"></div>
+      <div class="legend">
+        <div><span class="dot staffed"></span>有人確定</div>
+        <div><span class="dot mixed"></span>併設/時間帯</div>
+        <div><span class="dot self"></span>セルフ</div>
+        <div><span class="dot unknown"></span>判定不明</div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+<script>
+(() => {
+  'use strict';
+
+  const DEFAULT = { lat: 35.9064, lon: 139.6237, label: '大宮駅付近' };
+  const OVERPASS_ENDPOINTS = [
+    'https://overpass.private.coffee/api/interpreter',
+    'https://overpass-api.de/api/interpreter'
+  ];
+  const els = Object.fromEntries([
+    'place','placeSearch','locate','useMapCenter','placeStatus','radius','findStations','apiStatus',
+    'nStaffed','nMixed','nSelf','nUnknown','stationList','visibleCount','filters','exportCsv'
+  ].map(id => [id, document.getElementById(id)]));
+
+  const state = {
+    center: { ...DEFAULT },
+    stations: [],
+    filter: 'staffed',
+    stationLayer: null,
+    centerMarker: null,
+    radiusCircle: null,
+    lastGeocodeAt: 0,
+    lastOverpassAt: 0
+  };
+
+  const map = L.map('map', { zoomControl: true }).setView([DEFAULT.lat, DEFAULT.lon], 13);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>'
+  }).addTo(map);
+  state.stationLayer = L.layerGroup().addTo(map);
+
+  function esc(value='') {
+    return String(value).replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
+  }
+
+  function icon(cls) {
+    return L.divIcon({ className: '', html: `<div class="marker-pin ${cls}"></div>`, iconSize: [26,26], iconAnchor: [13,25], popupAnchor: [0,-24] });
+  }
+
+  function setCenter(lat, lon, label='選択地点', zoom=true) {
+    state.center = { lat: Number(lat), lon: Number(lon), label };
+    if (state.centerMarker) map.removeLayer(state.centerMarker);
+    state.centerMarker = L.marker([lat, lon], { icon: icon('center'), zIndexOffset: 1000 })
+      .addTo(map).bindPopup(`<div class="popup-title">${esc(label)}</div><div class="popup-small">検索中心</div>`);
+    drawRadius();
+    if (zoom) map.setView([lat, lon], Math.max(map.getZoom(), 13));
+    els.placeStatus.textContent = `${label} / ${Number(lat).toFixed(5)}, ${Number(lon).toFixed(5)}`;
+  }
+
+  function drawRadius() {
+    if (state.radiusCircle) map.removeLayer(state.radiusCircle);
+    state.radiusCircle = L.circle([state.center.lat, state.center.lon], {
+      radius: Number(els.radius.value), weight: 1, opacity: .55, fillOpacity: .04
+    }).addTo(map);
+  }
+
+  map.on('click', e => setCenter(e.latlng.lat, e.latlng.lng, '地図で選択した地点', false));
+  els.radius.addEventListener('change', drawRadius);
+
+  async function searchPlace() {
+    const q = els.place.value.trim();
+    if (!q) return setStatus(els.placeStatus, '検索文字を入力してください。', true);
+
+    const cacheKey = `nominatim:${q}`;
+    const cached = localStorage.getItem(cacheKey);
+    if (cached) {
+      const r = JSON.parse(cached);
+      if (r?.lat && r?.lon) {
+        setCenter(r.lat, r.lon, r.display_name || q);
+        return;
+      }
+    }
+
+    const now = Date.now();
+    if (now - state.lastGeocodeAt < 1100) {
+      return setStatus(els.placeStatus, '場所検索は1秒以上あけて実行してください。', true);
+    }
+    state.lastGeocodeAt = now;
+    els.placeSearch.disabled = true;
+    setStatus(els.placeStatus, '場所を検索中…');
+
+    try {
+      const params = new URLSearchParams({ q, format: 'jsonv2', limit: '1', countrycodes: 'jp' });
+      const res = await fetch(`https://nominatim.openstreetmap.org/search?${params.toString()}`, {
+        headers: { 'Accept-Language': 'ja' }
+      });
+      if (!res.ok) throw new Error(`Nominatim HTTP ${res.status}`);
+      const data = await res.json();
+      if (!data.length) throw new Error('場所が見つかりませんでした');
+      const r = data[0];
+      localStorage.setItem(cacheKey, JSON.stringify(r));
+      setCenter(r.lat, r.lon, r.display_name || q);
+    } catch (err) {
+      setStatus(els.placeStatus, `場所検索エラー: ${err.message}`, true);
+    } finally {
+      els.placeSearch.disabled = false;
+    }
+  }
+
+  els.placeSearch.addEventListener('click', searchPlace);
+  els.place.addEventListener('keydown', e => { if (e.key === 'Enter') searchPlace(); });
+
+  els.locate.addEventListener('click', () => {
+    if (!navigator.geolocation) return setStatus(els.placeStatus, 'このブラウザは現在地取得に対応していません。', true);
+    els.locate.disabled = true;
+    setStatus(els.placeStatus, '現在地を取得中…');
+    navigator.geolocation.getCurrentPosition(
+      p => {
+        setCenter(p.coords.latitude, p.coords.longitude, '現在地');
+        els.locate.disabled = false;
+      },
+      e => {
+        setStatus(els.placeStatus, `現在地を取得できません: ${e.message}`, true);
+        els.locate.disabled = false;
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+    );
+  });
+
+  els.useMapCenter.addEventListener('click', () => {
+    const c = map.getCenter();
+    setCenter(c.lat, c.lng, '地図の中心', false);
+  });
+
+  function buildOverpassQuery() {
+    const r = Number(els.radius.value);
+    const { lat, lon } = state.center;
+    return `[out:json][timeout:25];\n(\n nwr(around:${r},${lat},${lon})["amenity"="fuel"];\n);\nout center tags;`;
+  }
+
+  async function fetchOverpass(query) {
+    let lastError;
+    for (const endpoint of OVERPASS_ENDPOINTS) {
+      try {
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+          body: 'data=' + encodeURIComponent(query)
+        });
+        if (!res.ok) throw new Error(`${new URL(endpoint).host}: HTTP ${res.status}`);
+        const json = await res.json();
+        return { json, endpoint };
+      } catch (e) { lastError = e; }
+    }
+    throw lastError || new Error('Overpass APIに接続できませんでした');
+  }
+
+  function normalize(v) { return String(v ?? '').trim().toLowerCase(); }
+
+  function classify(tags) {
+    const full = normalize(tags.full_service);
+    const self = normalize(tags.self_service);
+    const automated = normalize(tags.automated);
+    const fullCond = tags['full_service:conditional'];
+    const selfCond = tags['self_service:conditional'];
+    const name = `${tags.name || ''} ${tags.brand || ''} ${tags.operator || ''}`;
+    const nameSelf = /セルフ|self\s*-?\s*service|self\b/i.test(name);
+
+    if (full === 'yes' && (self === 'yes' || self === 'partially' || self === 'only')) {
+      return { type: 'mixed', label: '有人＋セルフ', reason: `OSM: full_service=${full}, self_service=${self}` };
+    }
+    if (full === 'yes' || self === 'no') {
+      return { type: 'staffed', label: '有人確定', reason: full === 'yes' ? 'OSM: full_service=yes' : 'OSM: self_service=no' };
+    }
+    if (fullCond || selfCond) {
+      return { type: 'mixed', label: '時間帯で変動', reason: `OSM条件付き: ${fullCond ? `full_service:conditional=${fullCond}` : `self_service:conditional=${selfCond}`}` };
+    }
+    if (self === 'partially') {
+      return { type: 'mixed', label: '一部セルフ', reason: 'OSM: self_service=partially' };
+    }
+    if (self === 'only' || (self === 'yes' && full === 'no') || (automated === 'yes' && full !== 'yes')) {
+      return { type: 'self', label: 'セルフ', reason: self === 'only' ? 'OSM: self_service=only' : `OSM: self_service=${self || '不明'}, full_service=${full || '不明'}, automated=${automated || '不明'}` };
+    }
+    if (nameSelf) {
+      return { type: 'self', label: 'セルフ推定', reason: '店名・ブランド名の「セルフ / self」表記から推定' };
+    }
+    if (self === 'yes') {
+      return { type: 'self', label: 'セルフ情報あり', reason: 'OSM: self_service=yes（有人併設の明示なし）' };
+    }
+    return { type: 'unknown', label: '判定不明', reason: '有人/セルフ判定に使えるOSMタグが未登録' };
+  }
+
+  function elementPoint(el) {
+    const lat = el.lat ?? el.center?.lat;
+    const lon = el.lon ?? el.center?.lon;
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+    return { lat, lon };
+  }
+
+  function haversineKm(a, b) {
+    const R = 6371;
+    const dLat = (b.lat-a.lat) * Math.PI/180;
+    const dLon = (b.lon-a.lon) * Math.PI/180;
+    const la1 = a.lat*Math.PI/180, la2=b.lat*Math.PI/180;
+    const h = Math.sin(dLat/2)**2 + Math.cos(la1)*Math.cos(la2)*Math.sin(dLon/2)**2;
+    return 2*R*Math.asin(Math.sqrt(h));
+  }
+
+  function parseStations(elements) {
+    const seen = new Set();
+    const out = [];
+    for (const el of elements || []) {
+      const p = elementPoint(el);
+      if (!p) continue;
+      const key = `${p.lat.toFixed(5)},${p.lon.toFixed(5)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const tags = el.tags || {};
+      const c = classify(tags);
+      out.push({
+        id: `${el.type}/${el.id}`,
+        lat: p.lat,
+        lon: p.lon,
+        name: tags.name || tags.brand || tags.operator || '名称未登録のガソリンスタンド',
+        brand: tags.brand || '',
+        operator: tags.operator || '',
+        opening: tags.opening_hours || '',
+        phone: tags.phone || tags['contact:phone'] || '',
+        website: tags.website || tags['contact:website'] || '',
+        type: c.type,
+        label: c.label,
+        reason: c.reason,
+        distance: haversineKm(state.center, p),
+        tags
+      });
+    }
+    return out.sort((a,b) => a.distance-b.distance);
+  }
+
+  async function findStations() {
+    const now = Date.now();
+    if (now - state.lastOverpassAt < 1500) {
+      return setStatus(els.apiStatus, '再検索は少し間隔をあけてください。', true);
+    }
+    state.lastOverpassAt = now;
+    els.findStations.disabled = true;
+    setStatus(els.apiStatus, 'OpenStreetMapから周辺GSを取得中…');
+    try {
+      const { json, endpoint } = await fetchOverpass(buildOverpassQuery());
+      state.stations = parseStations(json.elements);
+      renderAll();
+      const host = new URL(endpoint).host;
+      setStatus(els.apiStatus, `${state.stations.length}件取得しました（${host}）`);
+      els.exportCsv.disabled = state.stations.length === 0;
+      fitVisible();
+    } catch (err) {
+      setStatus(els.apiStatus, `GS取得エラー: ${err.message}`, true);
+    } finally {
+      els.findStations.disabled = false;
+    }
+  }
+
+  els.findStations.addEventListener('click', findStations);
+
+  function currentVisible() {
+    if (state.filter === 'all') return state.stations;
+    return state.stations.filter(s => s.type === state.filter);
+  }
+
+  function renderStats() {
+    const counts = { staffed:0, mixed:0, self:0, unknown:0 };
+    state.stations.forEach(s => counts[s.type]++);
+    els.nStaffed.textContent = counts.staffed;
+    els.nMixed.textContent = counts.mixed;
+    els.nSelf.textContent = counts.self;
+    els.nUnknown.textContent = counts.unknown;
+  }
+
+  function renderMap() {
+    state.stationLayer.clearLayers();
+    const visible = currentVisible();
+    for (const s of visible) {
+      const marker = L.marker([s.lat, s.lon], { icon: icon(s.type) }).addTo(state.stationLayer);
+      marker.bindPopup(`
+        <div class="popup-title">${esc(s.name)}</div>
+        <div class="popup-small">${esc(s.label)} / 約${s.distance.toFixed(1)} km</div>
+        <div class="popup-small">${esc(s.reason)}</div>
+        ${s.opening ? `<div class="popup-small">営業時間: ${esc(s.opening)}</div>` : ''}
+      `);
+      s._marker = marker;
+    }
+  }
+
+  function renderList() {
+    const visible = currentVisible();
+    els.visibleCount.textContent = `(${visible.length})`;
+    if (!visible.length) {
+      els.stationList.innerHTML = `<div class="empty">この条件に該当する店舗はありません。<br>「判定不明」も確認すると候補が増えることがあります。</div>`;
+      return;
+    }
+    els.stationList.innerHTML = visible.map((s, idx) => `
+      <button class="station" data-station-index="${state.stations.indexOf(s)}">
+        <div class="station-top">
+          <div class="station-name">${esc(s.name)}</div>
+          <span class="badge ${s.type}">${esc(s.label)}</span>
+        </div>
+        <div class="station-meta">
+          約 ${s.distance.toFixed(1)} km
+          ${s.brand ? ` ・ ${esc(s.brand)}` : ''}
+          ${s.opening ? `<br>営業時間: ${esc(s.opening)}` : ''}
+        </div>
+        <div class="reason">判定根拠: ${esc(s.reason)}</div>
+      </button>
+    `).join('');
+
+    els.stationList.querySelectorAll('.station').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const s = state.stations[Number(btn.dataset.stationIndex)];
+        if (!s) return;
+        map.setView([s.lat, s.lon], Math.max(map.getZoom(), 16));
+        if (s._marker) s._marker.openPopup();
+      });
+    });
+  }
+
+  function renderAll() { renderStats(); renderMap(); renderList(); }
+
+  els.filters.addEventListener('click', e => {
+    const btn = e.target.closest('[data-filter]');
+    if (!btn) return;
+    state.filter = btn.dataset.filter;
+    els.filters.querySelectorAll('.chip').forEach(x => x.classList.toggle('active', x === btn));
+    renderMap();
+    renderList();
+  });
+
+  function fitVisible() {
+    const points = currentVisible().map(s => [s.lat, s.lon]);
+    points.push([state.center.lat, state.center.lon]);
+    if (points.length > 1) map.fitBounds(points, { padding: [35,35], maxZoom: 15 });
+  }
+
+  els.exportCsv.addEventListener('click', () => {
+    const rows = [['名称','判定','判定根拠','距離km','ブランド','営業時間','緯度','経度','OSM ID']];
+    currentVisible().forEach(s => rows.push([s.name,s.label,s.reason,s.distance.toFixed(2),s.brand,s.opening,s.lat,s.lon,s.id]));
+    const csv = '\ufeff' + rows.map(r => r.map(v => `"${String(v ?? '').replaceAll('"','""')}"`).join(',')).join('\r\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'gas_stations.csv';
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(a.href);
+  });
+
+  function setStatus(el, text, isError=false) {
+    el.textContent = text;
+    el.classList.toggle('error', isError);
+  }
+
+  setCenter(DEFAULT.lat, DEFAULT.lon, DEFAULT.label, false);
+  setTimeout(() => map.invalidateSize(), 50);
+})();
+</script>
+</body>
+</html>
