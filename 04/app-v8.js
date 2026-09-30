@@ -18,7 +18,7 @@ const state = {
   location: { ...DEFAULT_LOCATION },
   site: { width: 12, height: 10 },
   wind: { from: 315, speed: 4, gust: null },
-  weather: { key:'', hourly:null, available:false, timezone:'', loading:false, requestSeq:0, source:'' },
+  weather: { key:'', hourly:null, available:false, timezone:'', loading:false, requestSeq:0, source:'', resolution:'' },
   items: [],
   mapMarkers: new Map(),
   baseMarker: null,
@@ -33,7 +33,7 @@ const refs = Object.fromEntries([
   'sunsetText','sunAzimuthText','sunAltitudeText','windDirInput','windDirOutput','windSpeedInput','windSpeedOutput','windAutoInput',
   'windGustOutput','weatherStatus','weatherRefreshBtn','sunNeedle','windNeedle','sunBearingText','windBearingText','emptySelection','selectionEditor','selectedName','selectedPreview',
   'rotationInput','rotationOutput','sizeInput','sizeOutput','riskList','importInput','locationLabel','terrainBadge','viewHint',
-  'placeSearchInput','placeSearchBtn','placeResults','searchStatus','pickOnMapBtn','mapPickNotice','locationPanelLabel'
+  'placeSearchInput','placeSearchBtn','placeResults','searchStatus','pickOnMapBtn','mapPickNotice','locationPanelLabel','diagnosticInfo'
 ].map(x => [x, $(x)]));
 
 const today = new Date();
@@ -48,7 +48,12 @@ const gsiStyle = {
   sources: {
     terrainSource: {
       type: 'raster-dem',
-      url: 'https://tiles.mapterhorn.com/tilejson.json'
+      tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'],
+      encoding: 'terrarium',
+      tileSize: 256,
+      minzoom: 0,
+      maxzoom: 15,
+      attribution: 'AWS Terrain Tiles'
     },
     gsi: {
       type: 'raster',
@@ -81,6 +86,13 @@ const map = new maplibregl.Map({
 });
 map.addControl(new maplibregl.NavigationControl({showCompass:true,visualizePitch:true}), 'bottom-right');
 
+const BUILD_VERSION='8.0.0';
+window.CAMP_LAYOUT_VERSION=BUILD_VERSION;
+if(refs.diagnosticInfo) refs.diagnosticInfo.textContent=`Build V${BUILD_VERSION}\nAPI: 未取得`;
+console.info(`[CampLayout V${BUILD_VERSION}] loaded`, location.href);
+if(location.protocol==='https:' && !/app-v8\.js/.test(import.meta.url)){ console.warn('V8 warning: unexpected module URL', import.meta.url); }
+console.info('[CampLayout V8] module', import.meta.url);
+
 map.on('load', () => {
   map.addSource('sun-ray', { type:'geojson', data: emptyFC() });
   map.addSource('shadow-ray', { type:'geojson', data: emptyFC() });
@@ -112,8 +124,9 @@ map.on('click', e => {
 
 map.on('error', e => {
   const msg = String(e?.error?.message || '');
-  if (msg.toLowerCase().includes('terrain') || msg.toLowerCase().includes('mapterhorn')) {
+  if (msg.toLowerCase().includes('terrain') || msg.toLowerCase().includes('amazonaws') || msg.toLowerCase().includes('elevation-tiles-prod')) {
     refs.terrainBadge.textContent = '3D PERSPECTIVE';
+    if(refs.diagnosticInfo) refs.diagnosticInfo.textContent += `\nTerrain: ${msg.slice(0,180)}`;
   }
 });
 
@@ -621,63 +634,172 @@ async function loadWeatherForSelectedDate(force=false){
   if(!refs.windAutoInput.checked)return;
   const date=refs.dateInput.value;
   if(!date)return;
+
   const diff=dayNumber(date)-dayNumber(localTodayString());
-  if(diff>15){
+  if(diff>217){
     state.weather.available=false;state.weather.hourly=null;state.weather.key='';
-    setWeatherStatus(`${date} は予報期間外です。Open-Meteoの時間別予報は最大16日先までです。`,'out');
+    setWeatherStatus(`${date} は長期予報の取得範囲外です（最大217日先）。`,'out');
+    if(refs.diagnosticInfo) refs.diagnosticInfo.textContent=`Build V${BUILD_VERSION}\n選択日: ${date}\nAPI: 範囲外`;
     syncAll();return;
   }
+
   const key=`${state.location.lat.toFixed(4)},${state.location.lng.toFixed(4)},${date}`;
-  if(!force && state.weather.key===key && state.weather.hourly){applyWeatherForTime();syncAll();return;}
+  if(!force && state.weather.key===key && state.weather.hourly){
+    applyWeatherForTime();syncAll();return;
+  }
+
   const seq=++state.weather.requestSeq;
   state.weather.loading=true;state.weather.available=false;
   setWeatherStatus(`${state.location.name} / ${date} の風データを取得中…`,'loading');
   syncAll();
-  try{
-    const endpoint=diff<=-5?'https://archive-api.open-meteo.com/v1/archive':'https://api.open-meteo.com/v1/forecast';
-    const url=new URL(endpoint);
-    if(diff>=0)url.searchParams.set('forecast_days','16');
-    url.searchParams.set('latitude',state.location.lat.toFixed(6));
-    url.searchParams.set('longitude',state.location.lng.toFixed(6));
-    url.searchParams.set('hourly','wind_speed_10m,wind_direction_10m,wind_gusts_10m');
-    url.searchParams.set('wind_speed_unit','ms');
-    url.searchParams.set('timezone','auto');
-    url.searchParams.set('start_date',date);
-    url.searchParams.set('end_date',date);
-    if(diff<0 && diff>-5)url.searchParams.set('past_days','5');
-    const res=await fetch(url.toString(),{headers:{'Accept':'application/json'}});
-    if(!res.ok)throw new Error(`Open-Meteo HTTP ${res.status}`);
-    const data=await res.json();
-    if(seq!==state.weather.requestSeq)return;
-    if(!data?.hourly?.time?.length)throw new Error('hourly wind data missing');
-    state.weather={...state.weather,key,hourly:data.hourly,available:true,timezone:data.timezone||'',loading:false,source:diff<=-5?'Open-Meteo Historical':'Open-Meteo Forecast'};
-    applyWeatherForTime();
-    syncAll();
-  }catch(e){
-    if(seq!==state.weather.requestSeq)return;
-    console.warn(e);
-    state.weather.available=false;state.weather.hourly=null;state.weather.loading=false;
-    setWeatherStatus('風データを取得できませんでした。ネットワーク接続または日付を確認してください。','error');
-    syncAll();
+
+  const requests=buildWeatherRequests(date,diff);
+  let lastError=null;
+
+  for(let attempt=0;attempt<requests.length;attempt++){
+    const req=requests[attempt];
+    try{
+      console.info('[CampLayout V8] weather request', attempt+1, req.source, req.url);
+      if(refs.diagnosticInfo){
+        const head=`Build V${BUILD_VERSION}\n配信: ${location.protocol==='https:'?'GitHub Pages/HTTPS':'ローカルまたはHTTP'}\n選択日: ${date}\n試行: ${attempt+1}/${requests.length}\n種別: ${req.source}\nGET ${req.url}`;
+        refs.diagnosticInfo.textContent=head;
+      }
+
+      const res=await fetch(req.url,{headers:{'Accept':'application/json'},cache:'no-store',credentials:'omit'});
+      const raw=await res.text();
+      let data=null;
+      try{data=raw?JSON.parse(raw):null;}catch{/* raw text is kept for diagnostics */}
+
+      if(!res.ok){
+        const reason=data?.reason||data?.error||raw||`HTTP ${res.status}`;
+        if(refs.diagnosticInfo) refs.diagnosticInfo.textContent += `\nHTTP: ${res.status}\n応答: ${String(reason).slice(0,500)}`;
+        throw new Error(`Open-Meteo HTTP ${res.status}: ${String(reason).slice(0,180)}`);
+      }
+      if(seq!==state.weather.requestSeq)return;
+      if(!data?.hourly?.time?.length)throw new Error('時間別の風データがありません');
+
+      state.weather={
+        ...state.weather,
+        key,
+        hourly:data.hourly,
+        available:true,
+        timezone:data.timezone||'',
+        loading:false,
+        source:req.source,
+        resolution:req.resolution
+      };
+      if(refs.diagnosticInfo) refs.diagnosticInfo.textContent += `\nHTTP: ${res.status}\nTimezone: ${data.timezone||'-'}\n件数: ${data.hourly.time.length}\n結果: 成功`;
+      applyWeatherForTime();
+      syncAll();
+      return;
+    }catch(e){
+      if(seq!==state.weather.requestSeq)return;
+      lastError=e;
+      console.warn('weather fetch attempt failed',attempt+1,e);
+      if(attempt<requests.length-1){
+        setWeatherStatus(`風APIの別方式で再試行しています… (${attempt+2}/${requests.length})`,'loading');
+      }
+    }
   }
+
+  state.weather.available=false;state.weather.hourly=null;state.weather.loading=false;
+  const detail=String(lastError?.message||lastError||'不明なエラー').slice(0,240);
+  setWeatherStatus(`風データを取得できませんでした：${detail}`,'error');
+  if(refs.diagnosticInfo && !refs.diagnosticInfo.textContent.includes('応答:')) refs.diagnosticInfo.textContent += `\nERROR: ${detail}`;
+  syncAll();
+}
+
+function baseWeatherParams(){
+  const p=new URLSearchParams();
+  p.set('latitude',state.location.lat.toFixed(6));
+  p.set('longitude',state.location.lng.toFixed(6));
+  p.set('timezone','auto');
+  p.set('wind_speed_unit','ms');
+  return p;
+}
+
+function makeWeatherUrl(endpoint,params){return `${endpoint}?${params.toString()}`;}
+
+function buildWeatherRequests(date,diff){
+  const exact=(endpoint,source,resolution,vars,extra={})=>{
+    const p=baseWeatherParams();
+    p.set('hourly',vars);
+    p.set('start_date',date);
+    p.set('end_date',date);
+    Object.entries(extra).forEach(([k,v])=>p.set(k,String(v)));
+    return {url:makeWeatherUrl(endpoint,p),source,resolution};
+  };
+
+  const range=(endpoint,source,resolution,vars,days,extra={})=>{
+    const p=baseWeatherParams();
+    p.set('hourly',vars);
+    p.set('forecast_days',String(days));
+    Object.entries(extra).forEach(([k,v])=>p.set(k,String(v)));
+    return {url:makeWeatherUrl(endpoint,p),source,resolution};
+  };
+
+  if(diff>=0 && diff<=15){
+    const vars='wind_speed_10m,wind_direction_10m,wind_gusts_10m';
+    return [
+      exact('https://api.open-meteo.com/v1/forecast','Open-Meteo 短期予報','1時間間隔',vars),
+      range('https://api.open-meteo.com/v1/forecast','Open-Meteo 短期予報（フォールバック）','1時間間隔',vars,16)
+    ];
+  }
+
+  if(diff>15){
+    const vars=diff<=46
+      ? 'wind_speed_10m,wind_direction_10m,wind_gusts_10m'
+      : 'wind_speed_10m,wind_direction_10m';
+    const extra={models:'ecmwf_seasonal_ensemble_mean_seamless'};
+    const days=Math.min(217,Math.max(17,diff+1));
+    return [
+      exact('https://seasonal-api.open-meteo.com/v1/seasonal','Open-Meteo 長期予報（ECMWF ensemble mean）','6時間間隔・36km広域予報',vars,extra),
+      range('https://seasonal-api.open-meteo.com/v1/seasonal','Open-Meteo 長期予報（フォールバック）','6時間間隔・36km広域予報',vars,days,extra)
+    ];
+  }
+
+  const vars='wind_speed_10m,wind_direction_10m,wind_gusts_10m';
+  if(date>='2022-01-01'){
+    return [
+      exact('https://historical-forecast-api.open-meteo.com/v1/forecast','Open-Meteo 過去予報','1時間間隔',vars),
+      exact('https://archive-api.open-meteo.com/v1/archive','Open-Meteo 過去気象（フォールバック）','1時間間隔',vars)
+    ];
+  }
+  return [exact('https://archive-api.open-meteo.com/v1/archive','Open-Meteo 過去気象','1時間間隔',vars)];
 }
 
 function applyWeatherForTime(){
   if(!refs.windAutoInput.checked || !state.weather.hourly)return;
   const h=state.weather.hourly;
+  const targetDate=refs.dateInput.value;
   const target=Number(refs.timeSlider.value);
   let best=-1,bestDiff=Infinity;
+
   for(let i=0;i<h.time.length;i++){
-    const tm=String(h.time[i]).slice(11,16).split(':').map(Number);
-    if(tm.length<2||!Number.isFinite(tm[0]))continue;
-    const mins=tm[0]*60+tm[1],d=Math.abs(mins-target);
-    if(d<bestDiff){bestDiff=d;best=i;}
+    const raw=String(h.time[i]);
+    const [dpart,tpart=''] = raw.split('T');
+    if(dpart!==targetDate)continue;
+    const tm=tpart.slice(0,5).split(':').map(Number);
+    if(tm.length<2||!Number.isFinite(tm[0])||!Number.isFinite(tm[1]))continue;
+    const mins=tm[0]*60+tm[1],delta=Math.abs(mins-target);
+    if(delta<bestDiff){bestDiff=delta;best=i;}
   }
-  if(best<0)return;
+
+  if(best<0){
+    state.weather.available=false;
+    setWeatherStatus(`${targetDate} の風データがAPI応答内に見つかりません。`,'error');
+    return;
+  }
+
   const speed=Number(h.wind_speed_10m?.[best]);
   const dir=Number(h.wind_direction_10m?.[best]);
   const gust=Number(h.wind_gusts_10m?.[best]);
-  if(!Number.isFinite(speed)||!Number.isFinite(dir))return;
+  if(!Number.isFinite(speed)||!Number.isFinite(dir)){
+    state.weather.available=false;
+    setWeatherStatus('取得した風データに風速または風向がありません。','error');
+    return;
+  }
+
   state.wind.speed=speed;
   state.wind.from=normBearing(dir);
   state.wind.gust=Number.isFinite(gust)?gust:null;
@@ -685,7 +807,8 @@ function applyWeatherForTime(){
   refs.windDirInput.value=Math.round(state.wind.from/5)*5%360;
   refs.windSpeedInput.value=clamp(state.wind.speed,0,25);
   const apiTime=String(h.time[best]).slice(11,16);
-  setWeatherStatus(`${state.weather.source} / ${apiTime} / ${compassName(state.wind.from)}から ${state.wind.speed.toFixed(1)} m/s${state.weather.timezone?` / ${state.weather.timezone}`:''}`,'ok');
+  const resText=state.weather.resolution?` / ${state.weather.resolution}`:'';
+  setWeatherStatus(`${state.weather.source} / ${apiTime} / ${compassName(state.wind.from)}から ${state.wind.speed.toFixed(1)} m/s${state.weather.timezone?` / ${state.weather.timezone}`:''}${resText}`,'ok');
 }
 
 function getDateTime(){
@@ -800,7 +923,7 @@ function updateRisks(){
 }
 
 function serializable(){
-  return {version:4,location:state.location,site:state.site,wind:state.wind,windAuto:refs.windAutoInput.checked,mode:state.mode,dimension:state.dimension,date:refs.dateInput.value,timeMinutes:Number(refs.timeSlider.value),items:state.items};
+  return {version:7,location:state.location,site:state.site,wind:state.wind,windAuto:refs.windAutoInput.checked,mode:state.mode,dimension:state.dimension,date:refs.dateInput.value,timeMinutes:Number(refs.timeSlider.value),items:state.items};
 }
 function applyData(data){
   if(!data||!Array.isArray(data.items))throw new Error('invalid');
@@ -819,15 +942,15 @@ function applyData(data){
   renderItems();updateSelectionEditor();syncAll();
   scheduleWeatherFetch(100);
 }
-function saveLocal(){localStorage.setItem('camp-layout-lab',JSON.stringify(serializable()));}
-function restoreLocal(){try{const raw=localStorage.getItem('camp-layout-lab');if(raw)applyData(JSON.parse(raw));}catch(e){console.warn(e);}}
+function saveLocal(){localStorage.setItem('camp-layout-lab-v7',JSON.stringify(serializable()));}
+function restoreLocal(){try{const raw=localStorage.getItem('camp-layout-lab-v7');if(raw)applyData(JSON.parse(raw));}catch(e){console.warn(e);}}
 
 $('saveLocalBtn').addEventListener('click',()=>{saveLocal();const b=$('saveLocalBtn'),old=b.textContent;b.textContent='保存しました';setTimeout(()=>b.textContent=old,900);});
 $('exportBtn').addEventListener('click',()=>{const blob=new Blob([JSON.stringify(serializable(),null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=`camp-layout-${refs.dateInput.value}.json`;a.click();URL.revokeObjectURL(url);});
 refs.importInput.addEventListener('change',async()=>{const f=refs.importInput.files?.[0];if(!f)return;try{applyData(JSON.parse(await f.text()));saveLocal();}catch{alert('JSONを読み込めませんでした。');}refs.importInput.value='';});
 $('resetBtn').addEventListener('click',()=>{
-  localStorage.removeItem('camp-layout-lab');
-  state.location={...DEFAULT_LOCATION};state.items=[];state.selectedId=null;state.mode='map';state.dimension='3d';state.weather={key:'',hourly:null,available:false,timezone:'',loading:false,requestSeq:state.weather.requestSeq+1,source:''};
+  localStorage.removeItem('camp-layout-lab-v7');
+  state.location={...DEFAULT_LOCATION};state.items=[];state.selectedId=null;state.mode='map';state.dimension='3d';state.weather={key:'',hourly:null,available:false,timezone:'',loading:false,requestSeq:state.weather.requestSeq+1,source:'',resolution:''};
   refs.windAutoInput.checked=true;
   seedDemo();refs.latInput.value=state.location.lat;refs.lngInput.value=state.location.lng;refs.locationLabel.textContent=state.location.name;refs.locationPanelLabel.textContent=state.location.name;
   map.jumpTo({center:[state.location.lng,state.location.lat],zoom:17});setMode('map');applyDimension(false);updateBaseMarker();renderItems();updateSelectionEditor();syncAll();scheduleWeatherFetch(50);saveLocal();

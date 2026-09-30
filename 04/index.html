@@ -4,15 +4,15 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <meta name="color-scheme" content="light" />
-  <title>Camp Layout Lab 3D</title>
+  <title>Camp Layout Lab 3D V8</title>
   <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@6.11.2/dist/maplibre-gl.css" />
-  <link rel="stylesheet" href="./styles.css" />
+  <link rel="stylesheet" href="./styles-v8.css?v=8.0.0" />
 </head>
 <body>
   <header class="topbar">
     <div class="brand">
       <div class="brand-mark">▲</div>
-      <div><strong>Camp Layout Lab</strong><span>3D SITE PLANNER · V4</span></div>
+      <div><strong>Camp Layout Lab</strong><span>3D SITE PLANNER · V8 · GITHUB PAGES</span></div>
     </div>
     <div class="top-actions">
       <button id="saveLocalBtn" class="ghost">保存</button>
@@ -132,11 +132,16 @@
         <div class="section-title">風</div>
         <label class="weather-toggle"><span><strong>APIから自動取得</strong><small>場所・日付・時刻に追従</small></span><input id="windAutoInput" type="checkbox" checked /></label>
         <div id="weatherStatus" class="weather-status"><span class="weather-dot loading"></span><span>風データを準備しています…</span></div>
+        <details class="diagnostic-details">
+          <summary>通信診断</summary>
+          <pre id="diagnosticInfo">V8 起動待ち…</pre>
+          <p class="diag-note">GitHub Pages から Open-Meteo へ HTTPS で直接接続します。旧 app.js は使用しません。</p>
+        </details>
         <label>風が来る方向<div class="range-with-value"><input id="windDirInput" type="range" min="0" max="355" step="5" value="315" /><output id="windDirOutput">北西 315°</output></div></label>
         <label>風速<div class="range-with-value"><input id="windSpeedInput" type="range" min="0" max="25" step="0.1" value="4" /><output id="windSpeedOutput">4.0 m/s</output></div></label>
         <div class="weather-extra"><span>最大瞬間風速</span><strong id="windGustOutput">-- m/s</strong></div>
         <button id="weatherRefreshBtn" class="secondary full">風データを再取得</button>
-        <p class="hint">自動時は Open-Meteo の10m風向・風速を使用します。風向は「どこから吹くか」です。予報期間外は自動取得できません。</p>
+        <p class="hint">自動時は Open-Meteo の10m風向・風速を使用します。風向は「どこから吹くか」です。16日先までは短期予報、それより先は長期予報（6時間間隔・広域）に自動切替します。</p>
       </section>
 
       <section>
@@ -158,6 +163,6 @@
   </main>
 
   <footer>地図: 国土地理院タイル / 3D地形: MapLibre Terrain / 場所検索: Nominatim/OpenStreetMap + 国土地理院 + Open-Meteo / 風: Open-Meteo / 太陽位置: SunCalc</footer>
-  <script type="module" src="./app.js"></script>
+  <script type="module" src="./app-v8.js?v=8.0.0"></script>
 </body>
 </html>
