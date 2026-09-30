@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="color-scheme" content="light" />
+  <title>Camp Layout Lab 3D</title>
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@6.11.2/dist/maplibre-gl.css" />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark">▲</div>
+      <div><strong>Camp Layout Lab</strong><span>3D SITE PLANNER · V4</span></div>
+    </div>
+    <div class="top-actions">
+      <button id="saveLocalBtn" class="ghost">保存</button>
+      <button id="exportBtn" class="ghost">JSON書き出し</button>
+      <label class="ghost file-label">JSON読込<input id="importInput" type="file" accept="application/json,.json" /></label>
+      <button id="resetBtn" class="danger-ghost">リセット</button>
+    </div>
+  </header>
+
+  <main class="app-shell">
+    <aside class="left-panel panel">
+      <section id="mapLocationSection" class="location-section">
+        <div class="section-kicker">STEP 1</div>
+        <div class="section-title location-title">場所を検索・設定</div>
+        <div class="location-help">ここでキャンプ場名・地名・住所を入力します。この地点が太陽と風データの基準になります。</div>
+        <div class="current-location-box"><span>現在の基準地点</span><strong id="locationPanelLabel">那須高原サンプル</strong></div>
+        <div class="search-row">
+          <input id="placeSearchInput" type="search" placeholder="キャンプ場名・地名・住所を入力" autocomplete="off" />
+          <button id="placeSearchBtn" class="primary">検索</button>
+        </div>
+        <div id="searchStatus" class="search-status">キャンプ場名・地名・住所を入力して「検索」を押してください。</div>
+        <div id="placeResults" class="place-results hidden"></div>
+        <button id="pickOnMapBtn" class="map-pick-btn">＋ 地図上から場所を選択</button>
+        <div class="field-grid two coord-grid">
+          <label>緯度<input id="latInput" type="number" step="0.000001" /></label>
+          <label>経度<input id="lngInput" type="number" step="0.000001" /></label>
+        </div>
+        <div class="row-actions">
+          <button id="moveMapBtn" class="secondary">緯度経度へ移動</button>
+          <button id="useCenterBtn" class="secondary">地図中央を採用</button>
+        </div>
+        <p class="hint">検索候補を選ぶと、地図がその場所へ移動し、選択日・時刻の風向／風速を自動取得します。白紙サイト表示中でも場所設定は利用できます。</p>
+      </section>
+
+      <section>
+        <div class="section-kicker">VIEW</div>
+        <div class="segmented" id="modeSwitch">
+          <button data-mode="map" class="active">地図</button>
+          <button data-mode="site">白紙サイト</button>
+        </div>
+        <div class="section-title compact-title">表示</div>
+        <div class="segmented" id="dimensionSwitch">
+          <button data-dimension="2d">2D</button>
+          <button data-dimension="3d" class="active">3D</button>
+        </div>
+      </section>
+
+
+
+      <section id="siteSizeSection" class="hidden">
+        <div class="section-title">サイト寸法</div>
+        <div class="field-grid two">
+          <label>横幅 m<input id="siteWidthInput" type="number" min="4" max="100" step="0.5" value="12" /></label>
+          <label>奥行 m<input id="siteHeightInput" type="number" min="4" max="100" step="0.5" value="10" /></label>
+        </div>
+      </section>
+
+      <section>
+        <div class="section-title">配置するもの</div>
+        <div id="palette" class="palette"></div>
+        <p class="hint">クリックすると画面中央に追加。配置後はそのままドラッグ移動できます。</p>
+      </section>
+    </aside>
+
+    <section class="workspace">
+      <div class="workspace-toolbar">
+        <div class="location-chip"><span class="dot"></span><span id="locationLabel">基準地点</span></div>
+        <div class="toolbar-right">
+          <span id="terrainBadge" class="terrain-badge">3D TERRAIN</span>
+          <div class="legend"><span><i class="sun-dot"></i>太陽</span><span><i class="shadow-dot"></i>影</span><span><i class="wind-dot"></i>風下</span></div>
+        </div>
+      </div>
+
+      <div id="stageWrap" class="stage-wrap dimension-3d">
+        <div id="map"></div>
+        <div id="mapPickNotice" class="map-pick-notice hidden">地図上の設営地点をクリックしてください　<span>ESCで解除</span></div>
+        <div id="siteBoard" class="site-board hidden">
+          <div class="site-ground"></div>
+          <div class="north">N ↑</div>
+          <div class="site-dim top" id="siteWidthLabel">12 m</div>
+          <div class="site-dim side" id="siteHeightLabel">10 m</div>
+          <svg id="siteOverlay" viewBox="0 0 1000 700" preserveAspectRatio="none" aria-hidden="true"></svg>
+          <div id="siteItems" class="site-items"></div>
+        </div>
+
+        <div class="view-hint" id="viewHint"><strong>3D表示</strong><span>右ドラッグ / Ctrl+ドラッグでも地図を傾けられます</span></div>
+        <div class="compass-card">
+          <div class="compass-title">設営コンパス</div>
+          <div class="compass">
+            <span class="n">N</span><span class="e">E</span><span class="s">S</span><span class="w">W</span>
+            <div id="sunNeedle" class="needle sun-needle"></div>
+            <div id="windNeedle" class="needle wind-needle"></div>
+            <div class="center-pin"></div>
+          </div>
+          <div class="compass-meta"><span id="sunBearingText">☀ 0°</span><span id="windBearingText">風下 0°</span></div>
+        </div>
+      </div>
+
+      <div class="timeline-card">
+        <div class="timeline-head">
+          <div><span class="section-kicker">TIME</span><strong id="timeText">15:00</strong></div>
+          <label class="date-field">日付<input id="dateInput" type="date" /></label>
+        </div>
+        <input id="timeSlider" class="timeline" type="range" min="0" max="1435" step="5" value="900" />
+        <div class="timeline-scale"><span>00:00</span><span>06:00</span><span>12:00</span><span>18:00</span><span>24:00</span></div>
+        <div class="sun-stats">
+          <div><small>日の出</small><strong id="sunriseText">--:--</strong></div>
+          <div><small>太陽方位</small><strong id="sunAzimuthText">--°</strong></div>
+          <div><small>太陽高度</small><strong id="sunAltitudeText">--°</strong></div>
+          <div><small>日の入</small><strong id="sunsetText">--:--</strong></div>
+        </div>
+      </div>
+    </section>
+
+    <aside class="right-panel panel">
+      <section>
+        <div class="section-title">風</div>
+        <label class="weather-toggle"><span><strong>APIから自動取得</strong><small>場所・日付・時刻に追従</small></span><input id="windAutoInput" type="checkbox" checked /></label>
+        <div id="weatherStatus" class="weather-status"><span class="weather-dot loading"></span><span>風データを準備しています…</span></div>
+        <label>風が来る方向<div class="range-with-value"><input id="windDirInput" type="range" min="0" max="355" step="5" value="315" /><output id="windDirOutput">北西 315°</output></div></label>
+        <label>風速<div class="range-with-value"><input id="windSpeedInput" type="range" min="0" max="25" step="0.1" value="4" /><output id="windSpeedOutput">4.0 m/s</output></div></label>
+        <div class="weather-extra"><span>最大瞬間風速</span><strong id="windGustOutput">-- m/s</strong></div>
+        <button id="weatherRefreshBtn" class="secondary full">風データを再取得</button>
+        <p class="hint">自動時は Open-Meteo の10m風向・風速を使用します。風向は「どこから吹くか」です。予報期間外は自動取得できません。</p>
+      </section>
+
+      <section>
+        <div class="section-title">選択中</div>
+        <div id="emptySelection" class="empty-state">配置物を選択してください。選択後も、そのままドラッグで移動できます。</div>
+        <div id="selectionEditor" class="hidden">
+          <div class="selected-card"><div id="selectedPreview" class="selected-preview"></div><div><small>SELECTED</small><strong id="selectedName"></strong></div></div>
+          <label>向き<div class="range-with-value"><input id="rotationInput" type="range" min="0" max="355" step="5" value="0" /><output id="rotationOutput">0°</output></div></label>
+          <label>サイズ<div class="range-with-value"><input id="sizeInput" type="range" min="60" max="180" step="5" value="100" /><output id="sizeOutput">100%</output></div></label>
+          <button id="deleteItemBtn" class="danger full">この配置物を削除</button>
+        </div>
+      </section>
+
+      <section>
+        <div class="section-title">配置診断</div>
+        <div id="riskList" class="risk-list"></div>
+      </section>
+    </aside>
+  </main>
+
+  <footer>地図: 国土地理院タイル / 3D地形: MapLibre Terrain / 場所検索: Nominatim/OpenStreetMap + 国土地理院 + Open-Meteo / 風: Open-Meteo / 太陽位置: SunCalc</footer>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
