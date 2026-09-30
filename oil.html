@@ -124,10 +124,23 @@
     .empty { padding: 18px 8px; text-align: center; color: var(--muted); font-size: 13px; }
 
     .station {
-      width: 100%; text-align: left; min-height: auto; padding: 12px;
+      width: 100%; text-align: left; padding: 12px;
       border: 1px solid var(--line); background: #fff; border-radius: 14px;
+      transition: border-color .15s ease, transform .15s ease;
     }
     .station:hover { border-color: #aeb8ae; transform: translateY(-1px); }
+    .station-main { cursor: pointer; }
+    .station-address { margin-top: 8px; font-size: 12px; line-height: 1.55; color: var(--ink); user-select: text; }
+    .station-address .address-label { color: var(--muted); font-size: 10px; font-weight: 800; display: block; margin-bottom: 2px; }
+    .station-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-top: 9px; }
+    .station-actions button, .station-actions a {
+      display: flex; align-items: center; justify-content: center; min-height: 36px;
+      padding: 7px 9px; border-radius: 10px; font-size: 11px; font-weight: 850;
+      text-decoration: none; border: 1px solid var(--line); background: #f7f9f6; color: var(--ink);
+    }
+    .station-actions a { background: var(--accent2); color: var(--accent); border-color: #c9d9ce; }
+    .station-actions button:hover, .station-actions a:hover { filter: brightness(.98); }
+    .copy-ok { color: var(--staffed) !important; border-color: #b9d8c7 !important; background: #eef8f2 !important; }
     .station-top { display: flex; gap: 8px; align-items: flex-start; justify-content: space-between; }
     .station-name { font-weight: 850; line-height: 1.35; }
     .badge { white-space: nowrap; border-radius: 999px; padding: 4px 8px; font-size: 10px; font-weight: 900; color: white; }
@@ -283,7 +296,9 @@
     centerMarker: null,
     radiusCircle: null,
     lastGeocodeAt: 0,
-    lastOverpassAt: 0
+    lastReverseAt: 0,
+    lastOverpassAt: 0,
+    addressGeneration: 0
   };
 
   const map = L.map('map', { zoomControl: true }).setView([DEFAULT.lat, DEFAULT.lon], 13);
@@ -411,6 +426,94 @@
 
   function normalize(v) { return String(v ?? '').trim().toLowerCase(); }
 
+
+  function joinAddressParts(parts) {
+    return parts.filter(Boolean).map(v => String(v).trim()).filter(Boolean).join('');
+  }
+
+  function addressFromTags(tags={}) {
+    if (tags['addr:full']) return tags['addr:full'];
+    const postcode = tags['addr:postcode'] || '';
+    const province = tags['addr:province'] || tags['addr:state'] || '';
+    const city = tags['addr:city'] || tags['addr:town'] || tags['addr:village'] || '';
+    const suburb = tags['addr:suburb'] || tags['addr:quarter'] || tags['addr:neighbourhood'] || '';
+    const street = tags['addr:street'] || tags['addr:place'] || '';
+    const house = tags['addr:housenumber'] || '';
+    const body = joinAddressParts([province, city, suburb, street, house]);
+    return [postcode ? `〒${postcode}` : '', body].filter(Boolean).join(' ');
+  }
+
+  function googleMapsUrl(s) {
+    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${s.lat},${s.lon}`)}`;
+  }
+
+  function reverseCacheKey(s) {
+    return `reverse:${s.lat.toFixed(5)},${s.lon.toFixed(5)}`;
+  }
+
+  async function waitForReverseSlot() {
+    const wait = Math.max(0, 1100 - (Date.now() - state.lastReverseAt));
+    if (wait) await new Promise(resolve => setTimeout(resolve, wait));
+    state.lastReverseAt = Date.now();
+  }
+
+  async function reverseGeocodeStation(s) {
+    if (s.address && s.addressSource === 'osm') return s.address;
+    const key = reverseCacheKey(s);
+    const cached = localStorage.getItem(key);
+    if (cached) {
+      try {
+        const r = JSON.parse(cached);
+        if (r?.display_name) {
+          s.address = r.display_name;
+          s.addressSource = 'reverse-cache';
+          return s.address;
+        }
+      } catch (_) {}
+    }
+
+    await waitForReverseSlot();
+    const params = new URLSearchParams({
+      lat: String(s.lat), lon: String(s.lon), format: 'jsonv2', zoom: '18', addressdetails: '1'
+    });
+    const res = await fetch(`https://nominatim.openstreetmap.org/reverse?${params.toString()}`, {
+      headers: { 'Accept-Language': 'ja' }
+    });
+    if (!res.ok) throw new Error(`Nominatim HTTP ${res.status}`);
+    const data = await res.json();
+    if (!data?.display_name) throw new Error('住所を取得できませんでした');
+    localStorage.setItem(key, JSON.stringify({ display_name: data.display_name }));
+    s.address = data.display_name;
+    s.addressSource = 'reverse';
+    return s.address;
+  }
+
+  function updateStationAddressUi(s) {
+    document.querySelectorAll(`[data-address-id="${CSS.escape(s.id)}"]`).forEach(el => {
+      el.textContent = s.address || '住所を取得できませんでした';
+    });
+    document.querySelectorAll(`[data-copy-id="${CSS.escape(s.id)}"]`).forEach(btn => {
+      btn.disabled = !s.address;
+      btn.textContent = '住所をコピー';
+    });
+    if (s._marker) s._marker.setPopupContent(popupHtml(s));
+  }
+
+  async function enrichMissingAddresses(generation) {
+    const targets = state.stations.filter(s => !s.address);
+    for (const s of targets) {
+      if (generation !== state.addressGeneration) return;
+      try {
+        await reverseGeocodeStation(s);
+      } catch (_) {
+        s.address = `緯度 ${s.lat.toFixed(6)}, 経度 ${s.lon.toFixed(6)}`;
+        s.addressSource = 'coordinates';
+      }
+      if (generation !== state.addressGeneration) return;
+      updateStationAddressUi(s);
+    }
+  }
+
   function classify(tags) {
     const full = normalize(tags.full_service);
     const self = normalize(tags.self_service);
@@ -485,6 +588,8 @@
         label: c.label,
         reason: c.reason,
         distance: haversineKm(state.center, p),
+        address: addressFromTags(tags),
+        addressSource: addressFromTags(tags) ? 'osm' : '',
         tags
       });
     }
@@ -502,11 +607,17 @@
     try {
       const { json, endpoint } = await fetchOverpass(buildOverpassQuery());
       state.stations = parseStations(json.elements);
+      state.addressGeneration += 1;
+      const generation = state.addressGeneration;
       renderAll();
       const host = new URL(endpoint).host;
-      setStatus(els.apiStatus, `${state.stations.length}件取得しました（${host}）`);
+      const missing = state.stations.filter(s => !s.address).length;
+      setStatus(els.apiStatus, `${state.stations.length}件取得しました（${host}）${missing ? ` / 住所を順次取得中: ${missing}件` : ''}`);
       els.exportCsv.disabled = state.stations.length === 0;
       fitVisible();
+      enrichMissingAddresses(generation).then(() => {
+        if (generation === state.addressGeneration) setStatus(els.apiStatus, `${state.stations.length}件取得しました（${host}） / 住所取得完了`);
+      });
     } catch (err) {
       setStatus(els.apiStatus, `GS取得エラー: ${err.message}`, true);
     } finally {
@@ -530,17 +641,23 @@
     els.nUnknown.textContent = counts.unknown;
   }
 
+  function popupHtml(s) {
+    return `
+      <div class="popup-title">${esc(s.name)}</div>
+      <div class="popup-small">${esc(s.label)} / 約${s.distance.toFixed(1)} km</div>
+      <div class="popup-small">${esc(s.reason)}</div>
+      ${s.opening ? `<div class="popup-small">営業時間: ${esc(s.opening)}</div>` : ''}
+      <div class="popup-small"><b>住所:</b> ${esc(s.address || '取得中…')}</div>
+      <div class="popup-small"><a href="${googleMapsUrl(s)}" target="_blank" rel="noopener noreferrer">Googleマップで開く</a></div>
+    `;
+  }
+
   function renderMap() {
     state.stationLayer.clearLayers();
     const visible = currentVisible();
     for (const s of visible) {
       const marker = L.marker([s.lat, s.lon], { icon: icon(s.type) }).addTo(state.stationLayer);
-      marker.bindPopup(`
-        <div class="popup-title">${esc(s.name)}</div>
-        <div class="popup-small">${esc(s.label)} / 約${s.distance.toFixed(1)} km</div>
-        <div class="popup-small">${esc(s.reason)}</div>
-        ${s.opening ? `<div class="popup-small">営業時間: ${esc(s.opening)}</div>` : ''}
-      `);
+      marker.bindPopup(popupHtml(s));
       s._marker = marker;
     }
   }
@@ -552,27 +669,55 @@
       els.stationList.innerHTML = `<div class="empty">この条件に該当する店舗はありません。<br>「判定不明」も確認すると候補が増えることがあります。</div>`;
       return;
     }
-    els.stationList.innerHTML = visible.map((s, idx) => `
-      <button class="station" data-station-index="${state.stations.indexOf(s)}">
-        <div class="station-top">
-          <div class="station-name">${esc(s.name)}</div>
-          <span class="badge ${s.type}">${esc(s.label)}</span>
+    els.stationList.innerHTML = visible.map(s => `
+      <article class="station" data-station-index="${state.stations.indexOf(s)}">
+        <div class="station-main" data-focus-station="${state.stations.indexOf(s)}" tabindex="0" role="button" aria-label="${esc(s.name)}を地図で表示">
+          <div class="station-top">
+            <div class="station-name">${esc(s.name)}</div>
+            <span class="badge ${s.type}">${esc(s.label)}</span>
+          </div>
+          <div class="station-meta">
+            約 ${s.distance.toFixed(1)} km
+            ${s.brand ? ` ・ ${esc(s.brand)}` : ''}
+            ${s.opening ? `<br>営業時間: ${esc(s.opening)}` : ''}
+          </div>
+          <div class="station-address">
+            <span class="address-label">住所</span>
+            <span data-address-id="${esc(s.id)}">${esc(s.address || '住所を取得中…')}</span>
+          </div>
+          <div class="reason">判定根拠: ${esc(s.reason)}</div>
         </div>
-        <div class="station-meta">
-          約 ${s.distance.toFixed(1)} km
-          ${s.brand ? ` ・ ${esc(s.brand)}` : ''}
-          ${s.opening ? `<br>営業時間: ${esc(s.opening)}` : ''}
+        <div class="station-actions">
+          <button type="button" data-copy-id="${esc(s.id)}" ${s.address ? '' : 'disabled'}>住所をコピー</button>
+          <a href="${googleMapsUrl(s)}" target="_blank" rel="noopener noreferrer">Googleマップで開く</a>
         </div>
-        <div class="reason">判定根拠: ${esc(s.reason)}</div>
-      </button>
+      </article>
     `).join('');
 
-    els.stationList.querySelectorAll('.station').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const s = state.stations[Number(btn.dataset.stationIndex)];
+    els.stationList.querySelectorAll('[data-focus-station]').forEach(el => {
+      const focus = () => {
+        const s = state.stations[Number(el.dataset.focusStation)];
         if (!s) return;
         map.setView([s.lat, s.lon], Math.max(map.getZoom(), 16));
         if (s._marker) s._marker.openPopup();
+      };
+      el.addEventListener('click', focus);
+      el.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); focus(); } });
+    });
+
+    els.stationList.querySelectorAll('[data-copy-id]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const s = state.stations.find(x => x.id === btn.dataset.copyId);
+        if (!s?.address) return;
+        try {
+          await navigator.clipboard.writeText(s.address);
+        } catch (_) {
+          const ta = document.createElement('textarea');
+          ta.value = s.address; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove();
+        }
+        btn.textContent = 'コピーしました';
+        btn.classList.add('copy-ok');
+        setTimeout(() => { btn.textContent = '住所をコピー'; btn.classList.remove('copy-ok'); }, 1400);
       });
     });
   }
@@ -595,8 +740,8 @@
   }
 
   els.exportCsv.addEventListener('click', () => {
-    const rows = [['名称','判定','判定根拠','距離km','ブランド','営業時間','緯度','経度','OSM ID']];
-    currentVisible().forEach(s => rows.push([s.name,s.label,s.reason,s.distance.toFixed(2),s.brand,s.opening,s.lat,s.lon,s.id]));
+    const rows = [['名称','判定','判定根拠','距離km','住所','Googleマップ','ブランド','営業時間','緯度','経度','OSM ID']];
+    currentVisible().forEach(s => rows.push([s.name,s.label,s.reason,s.distance.toFixed(2),s.address || '',googleMapsUrl(s),s.brand,s.opening,s.lat,s.lon,s.id]));
     const csv = '\ufeff' + rows.map(r => r.map(v => `"${String(v ?? '').replaceAll('"','""')}"`).join(',')).join('\r\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
     const a = document.createElement('a');
