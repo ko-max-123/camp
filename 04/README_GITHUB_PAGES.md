@@ -1,37 +1,29 @@
-# Camp Layout Lab V8 — GitHub Pages 専用版
+# Camp Layout Lab V9 — GitHub Pages版
 
-このZIPは **GitHub Pages にそのまま置く前提** の構成です。Python、start.bat、launcher.py は不要です。
+V9は3D強化ではなく、現地利用向けの **GPS + スマホ方位 + 風向** を中心にした版です。
 
-## `camp/04` に置くファイル
+## GitHub Pagesへの配置
+`camp/04/` の `index.html` をこのV9版へ置き換え、同じフォルダに以下を置いてください。
 
 - `index.html`
-- `app-v8.js`
-- `styles-v8.css`
+- `app-v9.js`
+- `styles-v9.css`
 - `sample-layout.json`
 - `.nojekyll`
 
-`04` 内に旧 `app.js` / `styles.css` が残っていても V8 の `index.html` は参照しませんが、混乱防止のため削除して構いません。
+旧 `app.js` / `app-v8.js` / `styles.css` / `styles-v8.css` が残っていてもV9からは参照しません。
 
-## V8での主な修正
+## 現地モード
+1. GitHub PagesをHTTPSで開く
+2. 「GPS・方位を開始」を押す
+3. 位置情報と、端末によっては方位センサーの利用を許可する
+4. GPS現在地が風データの基準地点になります
+5. 方位が取れると「風は左後方から」「煙は右前方へ」のように自分基準で表示します
 
-- GitHub Pages用の相対パスだけで動作
-- `app-v8.js` / `styles-v8.css` に分離し旧版キャッシュを回避
-- 3D DEMは AWS Terrarium を使用。Mapterhorn は不使用
-- Open-Meteo の風APIは、選択日の1日取得を基本にし、失敗時に別方式へ自動フォールバック
-- `start_date/end_date` と `past_days/forecast_days` を同一リクエストで混在させない
-- 16日先までは通常予報、17〜217日先は Seasonal Forecast の ensemble mean
-- 過去データは Historical Forecast → Archive の順でフォールバック
-- 「通信診断」に実際のAPI URL・HTTP状態・件数を表示
+### 方位が取れない場合
+- iPhone/iPad: Safariでセンサー許可が必要です。開始ボタンを押した操作から許可ダイアログを出します。
+- Android: 端末・ブラウザにより絶対方位イベントの対応状況が異なります。移動中はGPSの移動方向を補助的に使います。
+- PC: GPSは取得できても、方位センサーが無い機種では端末方向は表示できません。
 
-## 正しくV8が公開されたか確認
-
-画面上部に次が表示されます。
-
-`3D SITE PLANNER · V8 · GITHUB PAGES`
-
-DevTools Console には次が出ます。
-
-`[CampLayout V8.0.0] loaded`
-`[CampLayout V8] module .../app-v8.js?...`
-
-旧版の `app.js:658` や `tiles.mapterhorn.com` が出る場合は、GitHub Pages がまだ旧ファイルを配信しています。GitHub Actions / Pages のデプロイ完了後に再読み込みしてください。
+## 注意
+スマホのコンパスは車体、金属製テーブル、ポール、磁石、モバイルバッテリー等の影響を受けます。表示は設営判断の補助として使用してください。

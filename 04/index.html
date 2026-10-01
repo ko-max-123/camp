@@ -4,15 +4,15 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <meta name="color-scheme" content="light" />
-  <title>Camp Layout Lab 3D V8</title>
+  <title>Camp Layout Lab Field V9</title>
   <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@6.11.2/dist/maplibre-gl.css" />
-  <link rel="stylesheet" href="./styles-v8.css?v=8.0.0" />
+  <link rel="stylesheet" href="./styles-v9.css?v=9.0.0" />
 </head>
 <body>
   <header class="topbar">
     <div class="brand">
       <div class="brand-mark">▲</div>
-      <div><strong>Camp Layout Lab</strong><span>3D SITE PLANNER · V8 · GITHUB PAGES</span></div>
+      <div><strong>Camp Layout Lab</strong><span>FIELD SITE PLANNER · V9 · GPS + COMPASS</span></div>
     </div>
     <div class="top-actions">
       <button id="saveLocalBtn" class="ghost">保存</button>
@@ -24,6 +24,31 @@
 
   <main class="app-shell">
     <aside class="left-panel panel">
+      <section id="fieldModeSection" class="field-section">
+        <div class="section-kicker">FIELD MODE</div>
+        <div class="section-title field-title">現在地・スマホ方位</div>
+        <div class="field-help">現地で「GPS・方位を開始」を押すと、現在地とスマホが向いている方向を使って風を自分基準で表示します。</div>
+        <div class="field-actions">
+          <button id="fieldStartBtn" class="primary">GPS・方位を開始</button>
+          <button id="fieldStopBtn" class="secondary" disabled>停止</button>
+        </div>
+        <div id="fieldSensorStatus" class="field-sensor-status idle"><span class="field-status-dot"></span><span>未開始</span></div>
+        <div class="field-readouts">
+          <div><small>GPS</small><strong id="fieldGpsText">--</strong></div>
+          <div><small>位置精度</small><strong id="fieldAccuracyText">-- m</strong></div>
+          <div><small>端末方向</small><strong id="fieldHeadingText">--°</strong></div>
+          <div><small>方位ソース</small><strong id="fieldHeadingSource">--</strong></div>
+        </div>
+        <label class="field-option"><span><strong>GPSを風の基準地点にする</strong><small>初回・250m以上移動時に更新</small></span><input id="fieldAutoBaseInput" type="checkbox" checked /></label>
+        <label class="field-option"><span><strong>地図を端末の向きに追従</strong><small>画面上方向＝自分が向いている方向</small></span><input id="fieldFollowMapInput" type="checkbox" /></label>
+        <label class="field-option"><span><strong>現在時刻に追従</strong><small>現地利用中は30秒ごとに更新</small></span><input id="fieldLiveTimeInput" type="checkbox" checked /></label>
+        <div class="row-actions">
+          <button id="fieldUseGpsBtn" class="secondary" disabled>現在地を基準地点に</button>
+          <button id="fieldNowBtn" class="secondary">現在時刻に合わせる</button>
+        </div>
+        <p class="hint">方位センサーは車・金属製ポール・モバイルバッテリーの近くでずれることがあります。GPSだけ取得できた場合も風データは利用できます。</p>
+      </section>
+
       <section id="mapLocationSection" class="location-section">
         <div class="section-kicker">STEP 1</div>
         <div class="section-title location-title">場所を検索・設定</div>
@@ -55,8 +80,8 @@
         </div>
         <div class="section-title compact-title">表示</div>
         <div class="segmented" id="dimensionSwitch">
-          <button data-dimension="2d">2D</button>
-          <button data-dimension="3d" class="active">3D</button>
+          <button data-dimension="2d" class="active">2D</button>
+          <button data-dimension="3d">3D</button>
         </div>
       </section>
 
@@ -81,12 +106,12 @@
       <div class="workspace-toolbar">
         <div class="location-chip"><span class="dot"></span><span id="locationLabel">基準地点</span></div>
         <div class="toolbar-right">
-          <span id="terrainBadge" class="terrain-badge">3D TERRAIN</span>
+          <span id="terrainBadge" class="terrain-badge hidden">3D TERRAIN</span>
           <div class="legend"><span><i class="sun-dot"></i>太陽</span><span><i class="shadow-dot"></i>影</span><span><i class="wind-dot"></i>風下</span></div>
         </div>
       </div>
 
-      <div id="stageWrap" class="stage-wrap dimension-3d">
+      <div id="stageWrap" class="stage-wrap">
         <div id="map"></div>
         <div id="mapPickNotice" class="map-pick-notice hidden">地図上の設営地点をクリックしてください　<span>ESCで解除</span></div>
         <div id="siteBoard" class="site-board hidden">
@@ -99,6 +124,18 @@
         </div>
 
         <div class="view-hint" id="viewHint"><strong>3D表示</strong><span>右ドラッグ / Ctrl+ドラッグでも地図を傾けられます</span></div>
+
+        <div id="fieldCompassHud" class="field-hud hidden" aria-live="polite">
+          <div class="field-hud-head"><strong>現地コンパス</strong><span id="fieldHudHeading">--°</span></div>
+          <div class="field-hud-dial">
+            <div id="hudNorthArm" class="hud-arm hud-north"><span>N</span></div>
+            <div id="hudWindArm" class="hud-arm hud-wind"><span>風元</span></div>
+            <div id="hudSmokeArm" class="hud-arm hud-smoke"><span>煙</span></div>
+            <div class="hud-you"><span>▲</span><small>YOU</small></div>
+          </div>
+          <div id="fieldRelativeText" class="field-relative-text">方位を取得中…</div>
+        </div>
+
         <div class="compass-card">
           <div class="compass-title">設営コンパス</div>
           <div class="compass">
@@ -132,10 +169,16 @@
         <div class="section-title">風</div>
         <label class="weather-toggle"><span><strong>APIから自動取得</strong><small>場所・日付・時刻に追従</small></span><input id="windAutoInput" type="checkbox" checked /></label>
         <div id="weatherStatus" class="weather-status"><span class="weather-dot loading"></span><span>風データを準備しています…</span></div>
+
+        <div id="fieldWindSummary" class="field-wind-summary">
+          <div><small>自分から見た風</small><strong id="fieldWindRelative">方位取得後に表示</strong></div>
+          <div><small>煙が流れる方向</small><strong id="fieldSmokeRelative">--</strong></div>
+        </div>
+
         <details class="diagnostic-details">
           <summary>通信診断</summary>
-          <pre id="diagnosticInfo">V8 起動待ち…</pre>
-          <p class="diag-note">GitHub Pages から Open-Meteo へ HTTPS で直接接続します。旧 app.js は使用しません。</p>
+          <pre id="diagnosticInfo">V9 起動待ち…</pre>
+          <p class="diag-note">GitHub Pages から Open-Meteo へHTTPSで直接接続します。GPS・方位センサーは端末の許可後に使用します。</p>
         </details>
         <label>風が来る方向<div class="range-with-value"><input id="windDirInput" type="range" min="0" max="355" step="5" value="315" /><output id="windDirOutput">北西 315°</output></div></label>
         <label>風速<div class="range-with-value"><input id="windSpeedInput" type="range" min="0" max="25" step="0.1" value="4" /><output id="windSpeedOutput">4.0 m/s</output></div></label>
@@ -162,7 +205,7 @@
     </aside>
   </main>
 
-  <footer>地図: 国土地理院タイル / 3D地形: MapLibre Terrain / 場所検索: Nominatim/OpenStreetMap + 国土地理院 + Open-Meteo / 風: Open-Meteo / 太陽位置: SunCalc</footer>
-  <script type="module" src="./app-v8.js?v=8.0.0"></script>
+  <footer>地図: 国土地理院タイル / 現在地: Geolocation API / 方位: DeviceOrientation / 風: Open-Meteo / 太陽位置: SunCalc</footer>
+  <script type="module" src="./app-v9.js?v=9.0.0"></script>
 </body>
 </html>
